@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Face Detection System</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Arial', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    .header { text-align: center; margin-bottom: 30px; color: white; }
+    .header h1 { font-size: 2.5rem; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+    .header p { font-size: 1.1rem; opacity: 0.9; }
+    .container {
+      background: white; border-radius: 20px; padding: 30px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      max-width: 900px; width: 100%;
+    }
+    .video-container {
+      position: relative; display: flex; justify-content: center;
+      margin-bottom: 20px; border-radius: 15px; overflow: hidden; background: #f8f9fa;
+    }
+    #video { width: 100%; max-width: 640px; height: auto; border-radius: 15px; }
+    #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    .controls { display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+    button {
+      background: linear-gradient(45deg, #667eea, #764ba2); color: white;
+      border: none; padding: 12px 24px; border-radius: 25px; cursor: pointer;
+      font-size: 1rem; font-weight: 500; transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+    button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+    .status { text-align: center; padding: 15px; border-radius: 10px; margin-bottom: 20px; font-weight: 500; }
+    .status.loading { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+    .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
+    .stat-card { background: #f8f9fa; padding: 20px; border-radius: 10px; text-align: center; border: 2px solid #e9ecef; }
+    .stat-number { font-size: 2rem; font-weight: bold; color: #667eea; margin-bottom: 5px; }
+    .stat-label { color: #6c757d; font-size: 0.9rem; }
+    .features { margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 15px; }
+    .features h3 { color: #333; margin-bottom: 15px; text-align: center; }
+    .features ul { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+    .features li { padding: 10px; background: white; border-radius: 8px; border-left: 4px solid #667eea; }
+    .features li::before { content: "✓ "; color: #28a745; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🤖 AI Face Detection System</h1>
+    <p>Real-time face recognition using BlazeFace & TensorFlow.js</p>
+  </div>
+
+  <div class="container">
+    <div id="status" class="status loading">Loading AI models... Please wait</div>
+    <div class="video-container">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn" disabled>Start Detection</button>
+      <button id="stopBtn" disabled>Stop Detection</button>
+      <button id="captureBtn" disabled>Capture Face</button>
+    </div>
+
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-number" id="faceCount">0</div>
+        <div class="stat-label">Faces Detected</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="fps">0</div>
+        <div class="stat-label">FPS</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="confidence">0%</div>
+        <div class="stat-label">Confidence</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@latest"></script>
+
+  <script>
+    class FaceDetectionSystem {
+      constructor() {
+        this.video = document.getElementById('video');
+        this.canvas = document.getElementById('canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.model = null;
+        this.isDetecting = false;
+        this.animationId = null;
+        this.faceCount = 0;
+        this.lastTime = Date.now();
+        this.fps = 0;
+        this.frameCount = 0;
+
+        this.initializeElements();
+        this.loadModel();
+      }
+
+      initializeElements() {
+        this.statusEl = document.getElementById('status');
+        this.startBtn = document.getElementById('startBtn');
+        this.stopBtn = document.getElementById('stopBtn');
+        this.captureBtn = document.getElementById('captureBtn');
+        this.faceCountEl = document.getElementById('faceCount');
+        this.fpsEl = document.getElementById('fps');
+        this.confidenceEl = document.getElementById('confidence');
+
+        this.startBtn.onclick = () => this.startDetection();
+        this.stopBtn.onclick = () => this.stopDetection();
+        this.captureBtn.onclick = () => this.captureFace();
+      }
+
+      updateStatus(message, type = 'loading') {
+        this.statusEl.textContent = message;
+        this.statusEl.className = `status ${type}`;
+      }
+
+      async loadModel() {
+        try {
+          this.updateStatus('Loading BlazeFace AI model...', 'loading');
+          this.model = await blazeface.load();
+          this.updateStatus('AI model loaded ✅ Click "Start Detection".', 'success');
+          this.startBtn.disabled = false;
+        } catch (error) {
+          console.error('Error loading model:', error);
+          this.updateStatus('❌ Error loading AI model.', 'error');
+        }
+      }
+
+      async startDetection() {
+        try {
+          this.updateStatus('Starting camera...', 'loading');
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+          this.video.srcObject = stream;
+
+          this.video.onloadedmetadata = () => {
+            this.canvas.width = this.video.videoWidth;
+            this.canvas.height = this.video.videoHeight;
+            this.isDetecting = true;
+            this.detectFaces();
+            this.updateStatus('🎯 Face detection active!', 'success');
+            this.startBtn.disabled = true;
+            this.stopBtn.disabled = false;
+            this.captureBtn.disabled = false;
+          };
+        } catch (error) {
+          console.error('Camera error:', error);
+          this.updateStatus('❌ Camera access denied.', 'error');
+        }
+      }
+
+      stopDetection() {
+        this.isDetecting = false;
+        if (this.animationId) cancelAnimationFrame(this.animationId);
+        if (this.video.srcObject) this.video.srcObject.getTracks().forEach(track => track.stop());
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.updateStatus('Detection stopped. Click "Start Detection" to resume.', 'loading');
+        this.startBtn.disabled = false;
+        this.stopBtn.disabled = true;
+        this.captureBtn.disabled = true;
+        this.faceCount = 0;
+        this.updateStats();
+      }
+
+      async detectFaces() {
+        if (!this.isDetecting || !this.model) return;
+        try {
+          const predictions = await this.model.estimateFaces(this.video, false);
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+          this.faceCount = predictions.length;
+          let totalConfidence = 0;
+
+          for (let i = 0; i < predictions.length; i++) {
+            const prediction = predictions[i];
+            const start = prediction.topLeft.arraySync ? prediction.topLeft.arraySync() : prediction.topLeft;
+            const end = prediction.bottomRight.arraySync ? prediction.bottomRight.arraySync() : prediction.bottomRight;
+            const size = [end[0] - start[0], end[1] - start[1]];
+            const confidence = prediction.probability ? prediction.probability[0] : 0.9;
+            totalConfidence += confidence;
+
+            this.ctx.strokeStyle = '#00ff00';
+            this.ctx.lineWidth = 3;
+            this.ctx.strokeRect(start[0], start[1], size[0], size[1]);
+
+            this.ctx.fillStyle = '#00ff00';
+            this.ctx.font = '16px Arial';
+            this.ctx.fillText(`Face ${i+1} (${Math.round(confidence*100)}%)`,
+              start[0], start[1] > 10 ? start[1] - 5 : 10);
+
+            if (prediction.landmarks) {
+              this.ctx.fillStyle = '#ff0000';
+              prediction.landmarks.forEach(landmark => {
+                this.ctx.beginPath();
+                this.ctx.arc(landmark[0], landmark[1], 2, 0, 2 * Math.PI);
+                this.ctx.fill();
+              });
+            }
+          }
+
+          const avgConfidence = predictions.length > 0 ? totalConfidence / predictions.length : 0;
+          this.confidenceEl.textContent = Math.round(avgConfidence * 100) + '%';
+
+          this.frameCount++;
+          const currentTime = Date.now();
+          if (currentTime - this.lastTime >= 1000) {
+            this.fps = this.frameCount;
+            this.frameCount = 0;
+            this.lastTime = currentTime;
+          }
+          this.updateStats();
+        } catch (error) {
+          console.error('Detection error:', error);
+        }
+        this.animationId = requestAnimationFrame(() => this.detectFaces());
+      }
+
+      updateStats() {
+        this.faceCountEl.textContent = this.faceCount;
+        this.fpsEl.textContent = this.fps;
+      }
+
+      captureFace() {
+        if (!this.isDetecting) return;
+        const captureCanvas = document.createElement('canvas');
+        const captureCtx = captureCanvas.getContext('2d');
+        captureCanvas.width = this.video.videoWidth;
+        captureCanvas.height = this.video.videoHeight;
+        captureCtx.drawImage(this.video, 0, 0);
+        const link = document.createElement('a');
+        link.download = `face-capture-${Date.now()}.png`;
+        link.href = captureCanvas.toDataURL();
+        link.click();
+        this.updateStatus('📸 Face captured!', 'success');
+        setTimeout(() => { if (this.isDetecting) this.updateStatus('🎯 Face detection active!', 'success'); }, 2000);
+      }
+    }
+
+    window.addEventListener('load', () => new FaceDetectionSystem());
+  </script>
+</body>
+</html>
